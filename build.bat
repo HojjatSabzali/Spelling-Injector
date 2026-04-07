@@ -12,7 +12,7 @@ if exist "main.build" rmdir /s /q "main.build"
 
 REM 2. Compile with Nuitka (Sets exe icon, includes app_icon.ico for Tkinter windows, and copies the icons folder)
 echo [2/5] Compiling with Nuitka...
-py -3.12 -m nuitka --mingw64 --assume-yes-for-downloads --standalone --enable-plugin=tk-inter --windows-console-mode=disable --windows-icon-from-ico=app_icon.ico --include-data-files=app_icon.ico=app_icon.ico --include-data-dir=icons=icons -o "Spelling Injector.exe" main.py
+py -3.12 -m nuitka --mingw64 --assume-yes-for-downloads --standalone --enable-plugin=tk-inter --windows-console-mode=disable --windows-icon-from-ico=app_icon.ico --include-data-files=app_icon.ico=app_icon.ico --include-package=pyttsx3 --include-package=comtypes --include-data-dir=icons=icons -o "Spelling Injector.exe" main.py
 
 REM 3. Rename the output folder
 echo [3/5] Renaming output folder...
