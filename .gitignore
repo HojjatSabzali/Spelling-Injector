@@ -1,0 +1,29 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# VS Code
+.vscode/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Nuitka build and distribution folders
+*.build/
+*.dist/
+Spelling-Injector/
+Spelling-Injector-Windows.zip
+
+# App specific generated files and user data
+backups/
+config.json
+words.xlsx
+memorized.xlsx
+new.xlsx
+
+# OS generated files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,56 @@
+name: Build Windows Executable
+
+on:
+  push:
+    tags:
+      - "v*" # Runs this workflow only when a tag starting with 'v' is pushed
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Required to fetch all tags for release notes extraction
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Build executable with Nuitka
+      run: |
+        # Sets the exe icon, includes app_icon.ico for Tkinter windows, and copies the icons directory
+        python -m nuitka --mingw64 --assume-yes-for-downloads --standalone --enable-plugin=tk-inter --windows-console-mode=disable --windows-icon-from-ico=app_icon.ico --include-data-files=app_icon.ico=app_icon.ico --include-data-dir=icons=icons -o "Spelling Injector.exe" main.py
+
+    - name: Package build
+      run: |
+        # Rename the output directory and compress it into a ZIP file
+        Rename-Item -Path "main.dist" -NewName "Spelling-Injector"
+        Compress-Archive -Path "Spelling-Injector" -DestinationPath "Spelling-Injector-windows.zip"
+
+    - name: Extract Release Notes from Tag
+      id: tag_notes
+      shell: bash
+      run: |
+        # Extract the annotated tag message to use as the GitHub release body
+        TAG_MESSAGE=$(git tag -l --format='%(contents)' ${{ github.ref_name }})
+        echo "notes<<EOF" >> $GITHUB_ENV
+        echo "$TAG_MESSAGE" >> $GITHUB_ENV
+        echo "EOF" >> $GITHUB_ENV
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: Spelling-Injector-windows.zip
+        body: ${{ env.notes }} # Inject the extracted release notes here
