@@ -32,6 +32,11 @@ CONFIG_PATH = os.path.join(SCRIPT_DIR, 'config.json')
 ICONS_DIR = os.path.join(SCRIPT_DIR, 'icons')
 ICON_PATH = os.path.join(SCRIPT_DIR, 'app_icon.ico')
 BACKUP_DIR = os.path.join(SCRIPT_DIR, 'backups')
+PRONUNCIATIONS_DIR = os.path.join(SCRIPT_DIR, 'pronunciations')
+
+# Create necessary directories
+if not os.path.exists(ICONS_DIR): os.makedirs(ICONS_DIR)
+if not os.path.exists(PRONUNCIATIONS_DIR): os.makedirs(PRONUNCIATIONS_DIR)
 
 # --- Config Management ---
 DEFAULT_CONFIG = {
@@ -118,16 +123,22 @@ THEME_COLORS = [
 
 # --- Change Windows Titlebar Color (Windows 11 API) ---
 def set_titlebar_color(win, color_hex):
-    try:
-        win.update()
-        hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
-        b = int(color_hex[5:7], 16)
-        g = int(color_hex[3:5], 16)
-        r = int(color_hex[1:3], 16)
-        color_bgr = (b << 16) | (g << 8) | r
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(ctypes.c_int(color_bgr)), 4)
-    except Exception:
-        pass
+    def apply_color():
+        try:
+            win.update_idletasks()
+            # Fetch the window handle (HWND) for the desktop window manager
+            hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
+            b = int(color_hex[5:7], 16)
+            g = int(color_hex[3:5], 16)
+            r = int(color_hex[1:3], 16)
+            color_bgr = (b << 16) | (g << 8) | r
+            # Apply the custom titlebar color using Windows 11 DWM API
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(ctypes.c_int(color_bgr)), 4)
+        except Exception:
+            pass
+            
+    # Schedule the color application after 20ms to ensure all window properties (like transient) are fully loaded
+    win.after(20, apply_color)
 
 # --- Data Management ---
 def create_empty_db_files():
@@ -260,10 +271,13 @@ def prompt_add_word_help():
     if config.get("hide_add_word_help", False): return True
     
     win = tk.Toplevel()
+    win.withdraw()  # Hide window during rendering
     win.title("How to add words")
     win.geometry("680x250")
     win.configure(bg=BG_COLOR)
     set_titlebar_color(win, BG_COLOR)
+    try: win.iconbitmap(ICON_PATH)
+    except: pass
     win.geometry(f"+{(win.winfo_screenwidth() - 680) // 2}+{(win.winfo_screenheight() - 250) // 2}")
     win.grab_set()
 
@@ -284,6 +298,7 @@ def prompt_add_word_help():
         win.destroy()
 
     RoundedButton(win, text="Select Excel File", command=proceed, bg_color="#2196F3", fg_color="white", width=180, height=40).pack(pady=10)
+    win.deiconify()  # Show window after setup is complete
     win.wait_window()
     return res[0]
 
@@ -441,25 +456,28 @@ def play_sound(word, config, force_offline=False):
 
     try:
         accent = config.get("accent", "us").strip().lower()
-        tld_val = 'com' if accent == 'us' else 'co.uk'
-        
+        tld_val = 'us' if accent == 'us' else 'co.uk'
         speed_setting = config.get("tts_speed", "normal")
         is_slow = (speed_setting == "slow")
+        speed_suffix = "slow" if is_slow else "normal"
         
-        tts = gTTS(text=word, lang='en', tld=tld_val, slow=is_slow)
+        # Clean the word and create the permanent storage path
+        clean_word = word.replace('*', '').strip().lower()
+        permanent_file = os.path.join(PRONUNCIATIONS_DIR, f"{clean_word}_{accent}_{speed_suffix}.mp3")
         
-        # Generate random names to avoid caching
-        temp_file = os.path.join(SCRIPT_DIR, f"temp_tts_{uuid.uuid4().hex}.mp3")
-        
-        tts.save(temp_file)
-        sound = pygame.mixer.Sound(temp_file)
+        # 1. Check if the file has already been downloaded and saved
+        if not os.path.exists(permanent_file):
+            # If not, download and save it in the permanent directory
+            tts = gTTS(text=clean_word, lang='en', tld=tld_val, slow=is_slow)
+            tts.save(permanent_file)
+            
+        # 2. Play from the local file (high speed)
+        sound = pygame.mixer.Sound(permanent_file)
         sound.play()
+        
         while pygame.mixer.get_busy():
             pygame.time.Clock().tick(10)
             
-        try: os.remove(temp_file)
-        except: pass
-        
         return True
     except Exception as e:
         print(f"Online TTS error: {e}")
@@ -638,19 +656,22 @@ def configure_treeview_style():
 # --- Windows ---
 def show_table_window(title, columns, data):
     win = tk.Toplevel()
+    win.withdraw()  # Hide window during rendering
     win.title(title)
     win.geometry("700x500")
     win.configure(bg=BG_COLOR)
     set_titlebar_color(win, BG_COLOR)
+    try: win.iconbitmap(ICON_PATH)
+    except: pass
     win.geometry(f"+{(win.winfo_screenwidth() - 700) // 2}+{(win.winfo_screenheight() - 500) // 2}")
 
     win.transient(win.master)
     win.grab_set()
     win.focus_set()
 
-    REGULAR_FONT = ("Segoe UI", 11)
-    BOLD_FONT = ("Segoe UI Black", 11) 
-    HEADER_FONT = ("Segoe UI", 10, "bold")
+    REGULAR_FONT = ("Segoe UI", 12)
+    BOLD_FONT = ("Segoe UI Black", 12) 
+    HEADER_FONT = ("Segoe UI", 11, "bold")
 
     frame = tk.Frame(win, bg=BG_COLOR)
     frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -658,15 +679,21 @@ def show_table_window(title, columns, data):
     header_frame = tk.Frame(frame, bg=BG_COLOR)
     header_frame.pack(fill=tk.X, pady=(0, 2))
 
-    column_widths = [250, 250, 100, 80] 
-    for i, col_name in enumerate(columns):
-        width = column_widths[i] if i < len(column_widths) else 150
-        lbl = tk.Label(header_frame, text=col_name, font=HEADER_FONT, bg="#E1E1E1", fg="black", relief="groove", bd=1, padx=5, pady=5)
-        lbl.grid(row=0, column=i, sticky="ew")
-        header_frame.grid_columnconfigure(i, weight=1, minsize=width)
+    # Dynamically set column tabs for perfect center alignment based on available width
+    num_cols = len(columns)
+    if num_cols == 2: column_widths = [330, 330]
+    elif num_cols == 3: column_widths = [260, 200, 200]
+    else: column_widths = [200] * num_cols
 
-    text_area = tk.Text(frame, wrap=tk.NONE, bg="white", relief="solid", bd=1,
-                        font=REGULAR_FONT, highlightthickness=0)
+    for i, col_name in enumerate(columns):
+        # Match application theme instead of white/gray
+        lbl = tk.Label(header_frame, text=col_name, font=HEADER_FONT, bg=BTN_BG, fg=BTN_FG, relief="flat", pady=8)
+        lbl.grid(row=0, column=i, sticky="ew", padx=1)
+        header_frame.grid_columnconfigure(i, weight=1)
+
+    # Use ENTRY_BG and ENTRY_FG to seamlessly blend with the active theme
+    text_area = tk.Text(frame, wrap=tk.NONE, bg=ENTRY_BG, fg=ENTRY_FG, relief="flat", bd=0,
+                        font=REGULAR_FONT, highlightthickness=0, pady=10)
     
     v_scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=text_area.yview)
     h_scrollbar = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=text_area.xview)
@@ -675,37 +702,39 @@ def show_table_window(title, columns, data):
     h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
     text_area.pack(fill=tk.BOTH, expand=True)
 
-    text_area.tag_configure("bold", font=BOLD_FONT)
-    text_area.tag_configure("cell_padding", lmargin1=10, lmargin2=10, rmargin=10)
+    text_area.tag_configure("bold", font=BOLD_FONT, foreground=ACCENT_COLOR)
 
+    # Configure precise center-aligned tab stops for each column
     tab_stops = []
-    current_pos = 0
+    current_x = 0
     for width in column_widths:
-        current_pos += width
-        tab_stops.append(current_pos)
+        center_x = current_x + (width // 2)
+        tab_stops.extend((center_x, tk.CENTER))
+        current_x += width
     text_area.config(tabs=tuple(tab_stops))
 
     for row in data:
+        text_area.insert(tk.END, "\t") # Tab to reach the first center alignment
         for i, cell_text in enumerate(row):
             cell_text = str(cell_text)
-            
             parts = cell_text.split('*')
             for j, part in enumerate(parts):
                 if j % 2 == 1: 
-                    text_area.insert(tk.END, part, ("bold", "cell_padding"))
+                    text_area.insert(tk.END, part, ("bold",))
                 elif part:
-                    text_area.insert(tk.END, part, ("cell_padding",))
+                    text_area.insert(tk.END, part)
             
             if i < len(row) - 1:
                 text_area.insert(tk.END, "\t")
         
-        text_area.insert(tk.END, "\n")
+        text_area.insert(tk.END, "\n\n") # Double newline for cleaner visual spacing
 
     text_area.config(state=tk.DISABLED)
+    win.deiconify()  # Show window after setup is complete
 
 def show_help(root):
     help_text = (
-        "Spelling Injector v1.0.0 – Help & Instructions\n"
+        "Spelling Injector v1.1.0 – Help & Instructions\n"
         "--------------------------------------------\n\n"
         "1) Start Practice:\n"
         "   - Initiates the main spelling practice session.\n"
@@ -722,11 +751,18 @@ def show_help(root):
         "3) Show Queue:\n"
         "   - Displays a split view of your ongoing practice cycle.\n"
         "   - Active Queue: Words currently waiting their turn to be practiced in this cycle.\n"
-        "   - Removed from Current Queue: Words you spelled correctly recently but haven't yet reached your 'target memorize count'. They are temporarily removed and will return in the next cycle.\n\n"
+        "   - Removed from Current Queue: Words you spelled correctly recently but haven't yet reached your 'target memorize count'. They are temporarily removed and will return in the next cycle.\n"
+        "   - The total count of words for each category is conveniently displayed in parentheses within the headers.\n\n"
         "4) Report & Memorized:\n"
         "   - Report: A complete table of all words currently in your learning phase, showing their correct hits vs. total attempts.\n"
-        "   - Memorized: Shows words that successfully reached the required target count. They are permanently memorized and logged with their 'Memorized Date'.\n\n"
-        "5) Settings Menu Configuration:\n"
+        "   - Memorized: Shows words that successfully reached the required target count. They are permanently memorized and logged with their 'Memorized Date'.\n"
+        "   - Column headers dynamically display the total number of words and the sum of attempts for quick progress tracking.\n\n"
+        "5) Download Audio:\n"
+        "   - Batch downloads the pronunciation files for all words currently in your database.\n"
+        "   - This ensures zero delay during practice and allows you to practice fully offline later.\n"
+        "   - The download strictly follows your current Settings (Accent and Speed). For example, if you want offline access to both US and UK accents, or Slow and Normal speeds, simply adjust the Settings and click 'Download Audio' again for each configuration.\n"
+        "   - Note: Your TTS Mode in Settings must be set to 'Online' to use this feature.\n\n"
+        "6) Settings Menu Configuration:\n"
         "   • Target correct answers to memorize:\n"
         "     - Defines how many times you must spell a word correctly before it moves to the Memorized list (Default is 5).\n"
         "   • Pronunciation Accent:\n"
@@ -759,10 +795,13 @@ def show_help(root):
     )
 
     win = tk.Toplevel()
+    win.withdraw()  # Hide window during rendering
     win.title("Help / About")
     win.geometry("800x650")
     win.configure(bg=BG_COLOR)
     set_titlebar_color(win, BG_COLOR)
+    try: win.iconbitmap(ICON_PATH)
+    except: pass
     win.geometry(f"+{(win.winfo_screenwidth() - 600) // 2}+{(win.winfo_screenheight() - 650) // 2}")
     
     win.transient(win.master)  # type: ignore
@@ -819,13 +858,17 @@ def show_help(root):
         if (event.state & 0x4) and event.keysym.lower() in ("c", "x", "v"): return
         return "break"
     txt.bind("<Key>", block_keys)
+    win.deiconify()  # Show window after setup is complete
 
 def open_settings_window(root):
     win = tk.Toplevel(root)
+    win.withdraw()  # Hide window during rendering
     win.title("Settings")
     win.geometry("500x480")
     win.configure(bg=BG_COLOR)
     set_titlebar_color(win, BG_COLOR)
+    try: win.iconbitmap(ICON_PATH)
+    except: pass
     win.geometry(f"+{(win.winfo_screenwidth() - 500) // 2}+{(win.winfo_screenheight() - 480) // 2}")
     win.transient(root)
     win.grab_set()
@@ -860,6 +903,17 @@ def open_settings_window(root):
     tts_var = tk.StringVar(value=config.get("tts_mode", "auto"))
     tts_frame = tk.Frame(options_frame, bg=BG_COLOR)
     tts_frame.grid(row=2, column=1, sticky="w", padx=5)
+
+    def on_tts_mode_change(*args):
+        if tts_var.get() == "auto":
+            fast_radio.config(state=tk.DISABLED)
+            if spd_var.get() == "fast":
+                spd_var.set("normal")
+        else:
+            fast_radio.config(state=tk.NORMAL)
+            
+    tts_var.trace_add("write", on_tts_mode_change)
+
     tk.Radiobutton(tts_frame, text="Online", variable=tts_var, value="auto", bg=BG_COLOR, fg=FG_COLOR, selectcolor=ENTRY_BG, activebackground=BG_COLOR, activeforeground=FG_COLOR).pack(side=tk.LEFT)
     tk.Radiobutton(tts_frame, text="Offline", variable=tts_var, value="offline", bg=BG_COLOR, fg=FG_COLOR, selectcolor=ENTRY_BG, activebackground=BG_COLOR, activeforeground=FG_COLOR).pack(side=tk.LEFT)
 
@@ -869,7 +923,11 @@ def open_settings_window(root):
     spd_frame.grid(row=3, column=1, sticky="w", padx=5)
     tk.Radiobutton(spd_frame, text="Slow", variable=spd_var, value="slow", bg=BG_COLOR, fg=FG_COLOR, selectcolor=ENTRY_BG, activebackground=BG_COLOR, activeforeground=FG_COLOR).pack(side=tk.LEFT)
     tk.Radiobutton(spd_frame, text="Normal", variable=spd_var, value="normal", bg=BG_COLOR, fg=FG_COLOR, selectcolor=ENTRY_BG, activebackground=BG_COLOR, activeforeground=FG_COLOR).pack(side=tk.LEFT)
-    tk.Radiobutton(spd_frame, text="Fast", variable=spd_var, value="fast", bg=BG_COLOR, fg=FG_COLOR, selectcolor=ENTRY_BG, activebackground=BG_COLOR, activeforeground=FG_COLOR).pack(side=tk.LEFT)
+    fast_radio = tk.Radiobutton(spd_frame, text="Fast", variable=spd_var, value="fast", bg=BG_COLOR, fg=FG_COLOR, selectcolor=ENTRY_BG, activebackground=BG_COLOR, activeforeground=FG_COLOR)
+    fast_radio.pack(side=tk.LEFT)
+    
+    # Initialize the correct button states upon opening
+    on_tts_mode_change()
 
     def open_color_picker():
         if hasattr(win, 'color_picker_is_open') and win.color_picker_is_open:
@@ -877,10 +935,13 @@ def open_settings_window(root):
         win.color_picker_is_open = True
 
         picker = tk.Toplevel(win)
+        picker.withdraw()  # Hide window during rendering
         picker.title("Choose Theme Color")
         picker.geometry("400x250")
         picker.configure(bg=BG_COLOR)
         set_titlebar_color(picker, BG_COLOR)
+        try: picker.iconbitmap(ICON_PATH)
+        except: pass
         picker.geometry(f"+{(picker.winfo_screenwidth() - 400) // 2}+{(picker.winfo_screenheight() - 250) // 2}")
         picker.transient(win)
         picker.grab_set()
@@ -906,6 +967,8 @@ def open_settings_window(root):
                 btn = tk.Canvas(grid_frame, width=28, height=28, bg=color, highlightthickness=1, highlightbackground=FG_COLOR, cursor="hand2")
                 btn.grid(row=r, column=c, padx=3, pady=3)
                 btn.bind("<ButtonRelease-1>", lambda e, col=color: select_color(col))
+        
+        picker.deiconify()  # Show window after setup is complete
 
     tk.Label(options_frame, text="Theme Color:", font=("Calibri", 12), bg=BG_COLOR, fg=FG_COLOR).grid(row=4, column=0, sticky="w", pady=8)
     color_btn_frame = tk.Frame(options_frame, bg=BG_COLOR)
@@ -1016,6 +1079,8 @@ def open_settings_window(root):
 
     btn_frame.grid_columnconfigure(0, weight=1)
     btn_frame.grid_columnconfigure(1, weight=1)
+    
+    win.deiconify()  # Show window after setup is complete
 
 # --- Practice Session ---
 def create_practice_window(data):
@@ -1046,6 +1111,7 @@ def create_practice_window(data):
     last_action_time = 0
 
     root = tk.Tk()
+    root.withdraw()  # Hide main window during rendering
     root.title("Practice Spelling")
     root.geometry("620x320")
     root.configure(bg=BG_COLOR)
@@ -1061,7 +1127,7 @@ def create_practice_window(data):
     status_label = tk.Label(root, text="", font=("Calibri", 12), bg=BG_COLOR, fg="#66B2FF", width=40)
     status_label.pack(pady=5)
     
-    word_display = tk.Text(root, font=("Calibri", 18), bg=BG_COLOR, height=1, width=35, bd=0, highlightthickness=0, state='disabled')
+    word_display = tk.Text(root, font=("Segoe UI", 18), bg=BG_COLOR, height=1, width=35, bd=0, highlightthickness=0, state='disabled', pady=10)
     word_display.tag_configure("center", justify='center')
     
     word_display.tag_configure("normal_text", font=("Segoe UI", 18, "normal"), foreground=ACCENT_COLOR)
@@ -1071,16 +1137,15 @@ def create_practice_window(data):
     def render_word_in_display(text_word):
         word_display.config(state='normal')
         word_display.delete("1.0", tk.END)
-        
+    
         parts = text_word.split('*')
-        word_display.insert(tk.END, "Word: ", ("center", "normal_text"))
-        
+    
         for i, part in enumerate(parts):
             if i % 2 == 1:
                 word_display.insert(tk.END, part, ("center", "bold_text"))
             else:
                 word_display.insert(tk.END, part, ("center", "normal_text"))
-                
+            
         word_display.config(state='disabled')
 
     btn_replay = None
@@ -1285,11 +1350,104 @@ def create_practice_window(data):
     entry.bind('<Return>', submit)
     root.protocol("WM_DELETE_WINDOW", back_to_menu)
     root.after(200, load_next_word_cycle)
+    root.deiconify()  # Show main window after setup is complete
     root.mainloop()
+
+def download_all_pronunciations(root):
+    config = load_config()
+    if config.get("tts_mode", "auto") == "offline":
+        messagebox.showinfo("Offline Mode Active", 
+                            "Your TTS mode is currently set to 'Offline', so downloading is not required.\n\n"
+                            "If you wish to download audio files, please go to Settings, switch to 'Online' mode, select your desired accent and speed, and then click Download Audio.",
+                            parent=root)
+        return
+
+    data = load_data_from_file(WORDS_PATH)
+    words_dict = data['words']
+    if not words_dict:
+        messagebox.showinfo("Empty", "No words found in database to download.", parent=root)
+        return
+
+    accent = config.get("accent", "us").strip().lower()
+    tld_val = 'us' if accent == 'us' else 'co.uk'
+    speed_setting = config.get("tts_speed", "normal")
+    is_slow = (speed_setting == "slow")
+    speed_suffix = "slow" if is_slow else "normal"
+
+    # Check which words have not been downloaded yet (considering the accent and speed)
+    words_to_download = []
+    for word in words_dict.keys():
+        clean_word = word.replace('*', '').strip().lower()
+        file_path = os.path.join(PRONUNCIATIONS_DIR, f"{clean_word}_{accent}_{speed_suffix}.mp3")
+        if not os.path.exists(file_path):
+            words_to_download.append(clean_word)
+
+    if not words_to_download:
+        messagebox.showinfo("Done!", f"All pronunciations ({accent.upper()} - {speed_suffix.title()}) are already downloaded!", parent=root)
+        return
+
+    # Create the download window
+    dl_win = tk.Toplevel(root)
+    dl_win.withdraw()  # Hide window during rendering
+    dl_win.title("Downloading Audio")
+    dl_win.geometry("450x250")
+    dl_win.configure(bg=BG_COLOR)
+    set_titlebar_color(dl_win, BG_COLOR)
+    try: dl_win.iconbitmap(ICON_PATH)
+    except: pass
+    dl_win.geometry(f"+{(dl_win.winfo_screenwidth() - 450) // 2}+{(dl_win.winfo_screenheight() - 250) // 2}")
+    dl_win.transient(root)
+    dl_win.grab_set()
+
+    tk.Label(dl_win, text="Downloading Missing Pronunciations", font=("Calibri", 16, "bold"), bg=BG_COLOR, fg=FG_COLOR).pack(pady=(15, 5))
+    tk.Label(dl_win, text=f"Target: {accent.upper()} Accent | Speed: {speed_suffix.title()}", font=("Calibri", 12), bg=BG_COLOR, fg="#66B2FF").pack(pady=(0, 10))
+    
+    progress_lbl = tk.Label(dl_win, text=f"0 / {len(words_to_download)}", font=("Calibri", 14, "bold"), bg=BG_COLOR, fg=ACCENT_COLOR)
+    progress_lbl.pack(pady=5)
+    
+    word_lbl = tk.Label(dl_win, text="Preparing...", font=("Calibri", 12), bg=BG_COLOR, fg=FG_COLOR)
+    word_lbl.pack(pady=5)
+    
+    progress_bar = ttk.Progressbar(dl_win, orient=tk.HORIZONTAL, length=350, mode='determinate', maximum=len(words_to_download))
+    progress_bar.pack(pady=10)
+    dl_win.deiconify()  # Show window after setup is complete
+
+    def download_task():
+        downloaded_count = 0
+        for clean_word in words_to_download:
+            if not dl_win.winfo_exists(): break  # Stop if the user closes the window
+            
+            word_lbl.config(text=f"Fetching: {clean_word}")
+            dl_win.update()
+            
+            file_path = os.path.join(PRONUNCIATIONS_DIR, f"{clean_word}_{accent}_{speed_suffix}.mp3")
+            try:
+                tts = gTTS(text=clean_word, lang='en', tld=tld_val, slow=is_slow)
+                tts.save(file_path)
+            except Exception as e:
+                print(f"Failed to download '{clean_word}': {e}")
+            
+            downloaded_count += 1
+            progress_lbl.config(text=f"{downloaded_count} / {len(words_to_download)}")
+            progress_bar['value'] = downloaded_count
+            dl_win.update()
+            
+            # Short delay to prevent being blocked by Google
+            import time
+            time.sleep(0.4) 
+
+        if dl_win.winfo_exists():
+            word_lbl.config(text="All downloads completed successfully!")
+            dl_win.update()
+            messagebox.showinfo("Complete", "Download process finished successfully!", parent=dl_win)
+            dl_win.destroy()
+
+    threading.Thread(target=download_task, daemon=True).start()
 
 # --- Main Menu UI ---
 def create_initial_window():
     root = tk.Tk()
+    root.withdraw()  # Hide main window during rendering
     root.title("Spelling Injector")
     root.geometry("800x550")
     root.configure(bg=BG_COLOR)
@@ -1336,12 +1494,17 @@ def create_initial_window():
         
         max_len = max(len(q_list), len(temp_removed))
         table_data = []
+        
+        active_count = len(q_list)
+        removed_count = len(temp_removed)
+        
         for i in range(max_len):
             col1 = words_dict[q_list[i]]['original_word'] if i < len(q_list) else ""
             col2 = temp_removed[i] if i < len(temp_removed) else ""
             table_data.append((col1, col2))
 
-        show_table_window("Current Practice Queue", ["Active Queue", "Removed from Current Queue"], table_data)
+        cols = [f"Active Queue ({active_count})", f"Removed from Current Queue ({removed_count})"]
+        show_table_window("Current Practice Queue", cols, table_data)
 
     def view_report():
         data = load_data_from_file(WORDS_PATH)
@@ -1350,29 +1513,52 @@ def create_initial_window():
             messagebox.showinfo("Report", "No words in learning process.")
             return
         table_data = [(d['original_word'], d['correct_count'], d['total_count']) for d in words_dict.values()]
-        show_table_window("Learning Report", ["Word", "Correct Hits", "Total Attempts"], table_data)
+        
+        total_words = len(words_dict)
+        sum_correct = sum(d['correct_count'] for d in words_dict.values())
+        sum_total = sum(d['total_count'] for d in words_dict.values())
+        
+        cols = [f"Word ({total_words})", f"Correct Hits ({sum_correct})", f"Total Attempts ({sum_total})"]
+        show_table_window("Learning Report", cols, table_data)
 
     def view_memorized():
         try:
             comp_wb = openpyxl.load_workbook(MEMORIZED_PATH, data_only=True)
             sheet = comp_wb.active
             table_data = []
+            sum_attempts = 0
+            
             for row in sheet.iter_rows(min_row=2, max_col=3, values_only=True):
-                if row[0]: table_data.append((row[0], row[1], row[2]))
+                if row[0]: 
+                    table_data.append((row[0], row[1], row[2]))
+                    try: sum_attempts += int(row[1])
+                    except: pass
             comp_wb.close()
+            
             if not table_data:
                 messagebox.showinfo("Memorized", "No memorized words yet.")
                 return
-            show_table_window("Memorized Words", ["Word", "Total Attempts", "Memorized Date"], table_data)
+            
+            total_words = len(table_data)
+            cols = [f"Word ({total_words})", f"Total Attempts ({sum_attempts})", "Memorized Date"]
+            show_table_window("Memorized Words", cols, table_data)
         except FileNotFoundError:
             messagebox.showinfo("Memorized", "No memorized words yet.")
 
+    # Main primary action
     HoverIcon(canvas, 70, 200, 220, 150, "start.png", "Start Practice", start_practice, bg_color=BG_COLOR)
+    
+    # Center queue block
     HoverIcon(canvas, 340, 150, 120, 250, "queue.png", "Show Queue", show_queue, bg_color=BG_COLOR)
-    HoverIcon(canvas, 540, 130, 140, 140, "add.png", "Add Word", load_words_from_xlsx, bg_color=BG_COLOR)
-    HoverIcon(canvas, 500, 320, 110, 110, "report.png", "Report", view_report, bg_color=BG_COLOR)
-    HoverIcon(canvas, 640, 320, 110, 110, "memorized.png", "Memorized", view_memorized, bg_color=BG_COLOR)
-
+    
+    # Column 1: Add Word & Report (Centered relative to each other)
+    HoverIcon(canvas, 490, 130, 140, 140, "add.png", "Add Word", load_words_from_xlsx, bg_color=BG_COLOR)
+    HoverIcon(canvas, 505, 320, 110, 110, "report.png", "Report", view_report, bg_color=BG_COLOR)
+    
+    # Column 2: Download Audio & Memorized (Shifted right to prevent overlap)
+    HoverIcon(canvas, 660, 145, 110, 110, "download_audio.png", "Download Audio", lambda: download_all_pronunciations(root), bg_color=BG_COLOR)
+    HoverIcon(canvas, 660, 320, 110, 110, "memorized.png", "Memorized", view_memorized, bg_color=BG_COLOR)
+    root.deiconify()  # Show main window after setup is complete
     root.mainloop()
 
 def main():
