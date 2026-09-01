@@ -37,7 +37,7 @@ jobs:
       run: |
         # Rename the output directory and compress it into a ZIP file
         Rename-Item -Path "main.dist" -NewName "Spelling-Injector"
-        Compress-Archive -Path "Spelling-Injector" -DestinationPath "Spelling-Injector-windows.zip"
+        Compress-Archive -Path "Spelling-Injector" -DestinationPath "Spelling-Injector-Windows.zip"
 
     - name: Extract Release Notes from Tag
       id: tag_notes
@@ -52,5 +52,5 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        files: Spelling-Injector-windows.zip
+        files: Spelling-Injector-Windows.zip
         body: ${{ env.notes }} # Inject the extracted release notes here

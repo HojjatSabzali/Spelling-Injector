@@ -19,10 +19,16 @@ Spelling-Injector-Windows.zip
 
 # App specific generated files and user data
 backups/
+pronunciations/
+temp_*.mp3
+temp_*.wav
 config.json
 words.xlsx
 memorized.xlsx
 new.xlsx
+
+# Utility scripts
+make_icon.py
 
 # OS generated files
 .DS_Store
