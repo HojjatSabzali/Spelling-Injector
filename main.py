@@ -303,52 +303,62 @@ def prompt_add_word_help():
     return res[0]
 
 def extract_rich_text_mapping(file_path):
-    ns = {'main': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+    import xml.etree.ElementTree as ET
+    import zipfile
     mapping = {}
     
     try:
         with zipfile.ZipFile(file_path, 'r') as z:
-            # Check if the file contains common Excel texts
             if 'xl/sharedStrings.xml' not in z.namelist():
                 return mapping
-                
             with z.open('xl/sharedStrings.xml') as f:
                 tree = ET.parse(f)
                 root = tree.getroot()
                 
-                for si in root.findall('main:si', ns):
-                    plain_text = ""
-                    starred_text = ""
-                    
-                    runs = si.findall('main:r', ns)
-                    # If the word contains different parts (such as bold and normal)
-                    if runs:
-                        for r in runs:
-                            t = r.find('main:t', ns)
-                            if t is not None and t.text:
-                                plain_text += t.text
-                                rPr = r.find('main:rPr', ns)
-                                # If the bold tag had <b>
-                                if rPr is not None and rPr.find('main:b', ns) is not None:
-                                    starred_text += f"*{t.text}*"
-                                else:
-                                    starred_text += t.text
-                    else:
-                        # If the word was completely unified
-                        t = si.find('main:t', ns)
-                        if t is not None and t.text:
-                            plain_text = t.text
-                            starred_text = t.text
+                for si in root.iter():
+                    if si.tag.endswith('}si') or si.tag == 'si':
+                        runs = [c for c in si if c.tag.endswith('}r') or c.tag == 'r']
+                        if runs:
+                            plain_text = ""
+                            runs_list = []
+                            for r in runs:
+                                t_text = ""
+                                has_rpr = False
+                                has_b = False
+                                b_val = True
+                                
+                                for child in r:
+                                    if child.tag.endswith('}t') or child.tag == 't':
+                                        if child.text: t_text = child.text
+                                    elif child.tag.endswith('}rPr') or child.tag == 'rPr':
+                                        has_rpr = True
+                                        for prop in child:
+                                            if prop.tag.endswith('}b') or prop.tag == 'b':
+                                                has_b = True
+                                                val = prop.get('val')
+                                                # If val is explicitly set to 0 or false, it's not bold
+                                                if val in ['0', 'false', 'False']:
+                                                    b_val = False
+                                                    
+                                if t_text:
+                                    # EXCEL LOGIC REVEALED:
+                                    if not has_rpr:
+                                        # No properties? It inherits the global cell style (None)
+                                        bold_status = None 
+                                    elif has_rpr and not has_b:
+                                        # Has properties but no 'b' tag? Explicitly NOT bold
+                                        bold_status = False
+                                    else:
+                                        # Has 'b' tag, use its value
+                                        bold_status = b_val
+                                        
+                                    plain_text += t_text
+                                    runs_list.append((t_text, bold_status))
                             
-                    # Remove double stars stuck together
-                    while "**" in starred_text:
-                        starred_text = starred_text.replace("**", "")
-                        
-                    if plain_text:
-                        mapping[plain_text] = starred_text
-                        
+                            if plain_text and len(runs_list) > 0:
+                                mapping[plain_text.strip().lower()] = runs_list
     except Exception as e:
-        print(f"Error parsing XML: {e}")
+        print(f"XML parsing error: {e}")
         
     return mapping
 
@@ -358,7 +368,7 @@ def load_words_from_xlsx():
     if not file_path: return
 
     try:
-        #1. First, we extract the map of bolded words directly from the heart of Excel.
+        # 1. First, we extract the map of bolded words directly from the heart of Excel XML.
         rich_text_dict = extract_rich_text_mapping(file_path)
 
         # 2. We read the file in the usual way to go row by row
@@ -381,24 +391,43 @@ def load_words_from_xlsx():
             cell = row[0]
             if cell.value:
                 plain_word = str(cell.value).strip()
+                lookup_key = plain_word.lower()
                 
-                # Final magic: We give the simple word to the dictionary, if it has a starred version we take it
-                if cell.font and cell.font.b:
-                    starred_word = f"*{plain_word}*"
+                # Check global cell font style
+                cell_is_bold = bool(cell.font and cell.font.b)
+                runs_list = rich_text_dict.get(lookup_key)
+                
+                if runs_list:
+                    starred_word = ""
+                    for text_part, bold_status in runs_list:
+                        # If bold_status is None, it inherits from cell_is_bold. Otherwise, use explicit status.
+                        is_bold = bold_status if bold_status is not None else cell_is_bold
+                        
+                        if is_bold:
+                            starred_word += f"*{text_part}*"
+                        else:
+                            starred_word += text_part
+                            
+                    # Clean up double stars caused by adjacent bold letters (e.g. *t**h* -> *th*)
+                    while "**" in starred_word:
+                        starred_word = starred_word.replace("**", "")
                 else:
-                    starred_word = rich_text_dict.get(plain_word, plain_word)
+                    # Fallback if no rich text formatting was found inside the cell runs
+                    if cell_is_bold:
+                        starred_word = f"*{plain_word}*"
+                    else:
+                        starred_word = plain_word
                 
                 clean_word = starred_word.replace('*', '').strip().lower()
-                
+
+                # Register the new word in the dictionary
                 if clean_word and clean_word not in words_dict and clean_word not in memorized_words:
-                    # We check if there is an asterisk inside the word or not
                     is_starred = ('*' in starred_word)
-                    
                     words_dict[clean_word] = {
-                        "original_word": starred_word,  # Words with stars in the first column
+                        "original_word": starred_word,
                         "correct_count": 0,
                         "total_count": 0,
-                        "star": is_starred  # This field causes the number 1 or 0 to be stored in the fourth column
+                        "star": is_starred 
                     }
                     new_words.append(clean_word)
                     added_count += 1
@@ -410,7 +439,7 @@ def load_words_from_xlsx():
         messagebox.showinfo("Success", f"{added_count} new words added and saved!\nTotal words in queue: {len(words_dict)}")
     except Exception as e:
         messagebox.showerror("Error", f"Could not read the Excel file:\n{e}")
-
+                
 # --- Audio Management ---
 def play_offline(word, config):
     try:
@@ -734,7 +763,7 @@ def show_table_window(title, columns, data):
 
 def show_help(root):
     help_text = (
-        "Spelling Injector v1.1.0 – Help & Instructions\n"
+        "Spelling Injector v1.1.1 – Help & Instructions\n"
         "--------------------------------------------\n\n"
         "1) Start Practice:\n"
         "   - Initiates the main spelling practice session.\n"
@@ -1130,8 +1159,8 @@ def create_practice_window(data):
     word_display = tk.Text(root, font=("Segoe UI", 18), bg=BG_COLOR, height=1, width=35, bd=0, highlightthickness=0, state='disabled', pady=10)
     word_display.tag_configure("center", justify='center')
     
-    word_display.tag_configure("normal_text", font=("Segoe UI", 18, "normal"), foreground=ACCENT_COLOR)
-    word_display.tag_configure("bold_text", font=("Segoe UI Black", 18), foreground=ACCENT_COLOR) 
+    word_display.tag_configure("normal_text", font=("Segoe UI", 18, "normal"), foreground=FG_COLOR)
+    word_display.tag_configure("bold_text", font=("Segoe UI", 18, "bold"), foreground=ACCENT_COLOR)
     word_display.pack(pady=5)
 
     def render_word_in_display(text_word):
@@ -1562,6 +1591,15 @@ def create_initial_window():
     root.mainloop()
 
 def main():
+    # Prevent multiple instances
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "SpellingInjector_Mutex")
+    if ctypes.windll.kernel32.GetLastError() == 183: # ERROR_ALREADY_EXISTS
+        hwnd = ctypes.windll.user32.FindWindowW(None, "Spelling Injector")
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 9) # SW_RESTORE
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+        sys.exit(0)
+
     if not os.path.exists(ICONS_DIR): os.makedirs(ICONS_DIR)
     pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
     create_empty_db_files()

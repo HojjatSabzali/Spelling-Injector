@@ -29,6 +29,7 @@ new.xlsx
 
 # Utility scripts
 make_icon.py
+test.py
 
 # OS generated files
 .DS_Store
