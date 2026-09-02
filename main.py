@@ -548,7 +548,8 @@ class RoundedButton(tk.Canvas):
         self.disabled_fg = "#D3D3D3"
         
         self.rect_id = self.create_rounded_rect(0, 0, width, height, radius, fill=bg_color)
-        self.text_id = self.create_text(width/2, height/2, text=text, fill=fg_color, font=font)
+        # Added justify=tk.CENTER to perfectly align multi-line texts
+        self.text_id = self.create_text(width/2, height/2, text=text, fill=fg_color, font=font, justify=tk.CENTER)
         
         self.config(cursor="hand2")
         self.bind("<Enter>", self.on_enter)
@@ -608,7 +609,7 @@ class RoundedButton(tk.Canvas):
         
     def get_text(self):
         return self.itemcget(self.text_id, 'text')
-
+    
 class HoverIcon(tk.Canvas):
     def __init__(self, parent, x, y, w, h, image_name, text, command, bg_color=BG_COLOR):
         self.zoom_factor = 1.1
@@ -763,13 +764,18 @@ def show_table_window(title, columns, data):
 
 def show_help(root):
     help_text = (
-        "Spelling Injector v1.1.1 – Help & Instructions\n"
+        "Spelling Injector v1.2.0 – Help & Instructions\n"
         "--------------------------------------------\n\n"
-        "1) Start Practice:\n"
-        "   - Initiates the main spelling practice session.\n"
-        "   - The app reads a word from your active queue and plays its pronunciation.\n"
-        "   - Type the correct spelling and press Enter.\n"
-        "   - Fallback: If the online Google TTS engine fails (due to network), the app prompts you to switch to the built-in Offline Engine.\n\n"
+        "1) Start Practice (100% Keyboard Friendly!):\n"
+        "   - The practice session is designed so you never need to touch your mouse.\n"
+        "   - Just start typing! The app will automatically focus on the text box.\n"
+        "   - [Enter]: Submit your typed spelling.\n"
+        "   - [Enter] (After correct spelling): If you typed correctly, the word is revealed. Press Enter once to move to the next word.\n"
+        "   - [Enter] (Empty Box - Unknown Word): You MUST type at least one guess for a new word. After your first attempt, pressing Enter on an empty box will ask for a reveal. Press Enter again to confirm.\n"
+        "   - [Enter] (Empty Box - Revealed Word): Once a word is revealed, simply press Enter with an empty box to move to the next word!\n"
+        "   - [Shift + Enter]: Replay the pronunciation audio.\n"
+        "   - [Esc]: Go back to the Main Menu.\n"
+        "   - Muscle Memory Practice Mode: If you typed a word wrong or revealed it, you enter practice mode! You can type the word and press Enter to practice (success/error beep). When finished, just clear the box and press Enter to move to the next word.\n\n"
         "2) Add Word (Adding from Excel):\n"
         "   - You can inject new words into the learning database using an Excel (.xlsx) file.\n"
         "   - Auto-generation: By default, a 'new.xlsx' file is automatically generated in the app folder on the first run. You can easily enter your words in the first column from top to bottom.\n"
@@ -876,7 +882,6 @@ def show_help(root):
     # Bold the 'ei' part in the word 'weird'
     start_weird = txt.search("weird", "1.0", tk.END)
     if start_weird:
-        # Adding +1c and +3c will make exactly the second and third letters, ei, bold.
         txt.tag_add("example_bold", f"{start_weird}+1c", f"{start_weird}+3c")
 
     context_menu = tk.Menu(txt, tearoff=0, bg=BG_COLOR, fg=FG_COLOR)
@@ -1138,22 +1143,24 @@ def create_practice_window(data):
     word_revealed = False
     is_current_word_failed = False
     last_action_time = 0
+    pending_reveal_confirmation = False
+    is_first_attempt = True # <--- Added logic to force first typing attempt
 
     root = tk.Tk()
-    root.withdraw()  # Hide main window during rendering
+    root.withdraw()
     root.title("Practice Spelling")
-    root.geometry("620x320")
+    root.geometry("660x360")
     root.configure(bg=BG_COLOR)
     set_titlebar_color(root, BG_COLOR)
     try: root.iconbitmap(ICON_PATH)
     except: pass
-    root.geometry(f"+{(root.winfo_screenwidth() - 620) // 2}+{(root.winfo_screenheight() - 320) // 2}")
+    root.geometry(f"+{(root.winfo_screenwidth() - 660) // 2}+{(root.winfo_screenheight() - 360) // 2}")
 
     tk.Label(root, text="Spell the word you hear:", font=("Calibri", 18, "bold"), bg=BG_COLOR, fg=FG_COLOR).pack(pady=(15, 10))
     entry = tk.Entry(root, font=("Calibri", 18), width=25, justify="center", bg=ENTRY_BG, fg=ENTRY_FG, insertbackground=ENTRY_FG)
     entry.pack(pady=10)
     
-    status_label = tk.Label(root, text="", font=("Calibri", 12), bg=BG_COLOR, fg="#66B2FF", width=40)
+    status_label = tk.Label(root, text="", font=("Calibri", 12), bg=BG_COLOR, fg="#66B2FF", width=55)
     status_label.pack(pady=5)
     
     word_display = tk.Text(root, font=("Segoe UI", 18), bg=BG_COLOR, height=1, width=35, bd=0, highlightthickness=0, state='disabled', pady=10)
@@ -1166,15 +1173,12 @@ def create_practice_window(data):
     def render_word_in_display(text_word):
         word_display.config(state='normal')
         word_display.delete("1.0", tk.END)
-    
         parts = text_word.split('*')
-    
         for i, part in enumerate(parts):
             if i % 2 == 1:
                 word_display.insert(tk.END, part, ("center", "bold_text"))
             else:
                 word_display.insert(tk.END, part, ("center", "normal_text"))
-            
         word_display.config(state='disabled')
 
     btn_replay = None
@@ -1201,18 +1205,20 @@ def create_practice_window(data):
         res = messagebox.askyesno("Connection Error", "Could not connect to online TTS (Google).\nDo you want to switch to the Offline Engine for this session?")
         if res:
             session_offline_fallback = True
-            btn_replay.set_text("Replay Sound")
+            btn_replay.set_text("Replay Sound\n(Shift+Enter)")
             btn_replay.change_color("#4CAF50")
             play_word_sound()
         else:
             update_status("Sound failed. Check internet or click retry.", "#F44336")
 
-    def handle_replay_action():
+    def handle_replay_action(event=None):
         nonlocal session_offline_fallback
-        if btn_replay.is_disabled: return
-        if btn_replay.get_text() == "Retry Online TTS":
-            session_offline_fallback = False
-        play_word_sound()
+        if btn_replay and not btn_replay.is_disabled:
+            if btn_replay.get_text() == "Retry Online TTS":
+                session_offline_fallback = False
+            play_word_sound()
+        entry.focus_set()
+        return "break"
 
     def play_word_sound():
         set_buttons_state("disable")
@@ -1230,7 +1236,7 @@ def create_practice_window(data):
         if success:
             mode = "Offline" if (session_offline_fallback or config['tts_mode'] == 'offline') else "Online"
             update_status(f"Sound played ({mode})", "#4CAF50")
-            btn_replay.set_text("Replay Sound")
+            btn_replay.set_text("Replay Sound\n(Shift+Enter)")
             btn_replay.change_color("#4CAF50")
         else:
             if not session_offline_fallback and config['tts_mode'] != 'offline':
@@ -1239,13 +1245,19 @@ def create_practice_window(data):
                 prompt_fallback()
             else:
                 update_status("Sound completely failed", "#F44336")
-                btn_replay.set_text("Replay Sound")
+                btn_replay.set_text("Replay Sound\n(Shift+Enter)")
                 btn_replay.change_color("#4CAF50")
         
-        root.after(100, lambda: entry.focus_set() if entry['state'] != 'disabled' else None)
+        root.after(100, lambda: entry.focus_set())
+
+    def force_next_word(event=None):
+        if btn_next and not btn_next.is_disabled:
+            if word_revealed:
+                load_next_word_cycle()
+        return "break"
 
     def load_next_word_cycle():
-        nonlocal word, original_word, word_revealed, is_current_word_failed
+        nonlocal word, original_word, word_revealed, is_current_word_failed, pending_reveal_confirmation, is_first_attempt
         if not queue:
             candidates = [w for w, d in words_dict.items() if d['correct_count'] < target_correct]
             if not candidates:
@@ -1262,59 +1274,67 @@ def create_practice_window(data):
         original_word = words_dict[word]['original_word']
         word_revealed = False
         is_current_word_failed = False
+        pending_reveal_confirmation = False
+        is_first_attempt = True # Reset for the new word
         
-        entry.config(state='normal')
         entry.delete(0, tk.END)
         
         word_display.config(state='normal')
         word_display.delete("1.0", tk.END)
         word_display.config(state='disabled')
         
-        btn_next.set_text("Show Spelling")
-        btn_replay.set_text("Replay Sound")
+        btn_next.set_text("Show Spelling\n(Enterx2)")
+        btn_replay.set_text("Replay Sound\n(Shift+Enter)")
         btn_replay.change_color("#4CAF50")
         
-        root.unbind('<Return>')
-        entry.bind('<Return>', submit)
         play_word_sound()
 
-    def action_next_btn(event=None):
-        nonlocal word_revealed, is_current_word_failed, last_action_time
-        current_time = time.time()
-        
-        if btn_next.is_disabled or (current_time - last_action_time < 0.3): 
-            return
-        last_action_time = current_time
-
-        if not word_revealed:
-            render_word_in_display(original_word)
-            word_revealed = True
-            btn_next.set_text("Next Word")
-            update_status("Spelling revealed.", "#D4AF37")
-            
-            if not is_current_word_failed and word in words_dict:
-                words_dict[word]['total_count'] += 1
-                queue.append(word)
-                save_data_to_file({'words': words_dict, 'queue': queue}, WORDS_PATH)
-            
-            entry.delete(0, tk.END)
-            entry.config(state='disabled')
-            root.unbind('<Return>')
-            root.bind('<Return>', action_next_btn)
-        else:
-            entry.config(state='normal')
-            entry.delete(0, tk.END)
-            root.unbind('<Return>')
-            entry.bind('<Return>', submit)
-            load_next_word_cycle()
-
-    def submit(event=None):
-        nonlocal word_revealed, is_current_word_failed, last_action_time
-        if btn_next.is_disabled: return
+    def handle_enter_key(event=None):
+        nonlocal pending_reveal_confirmation, is_first_attempt
+        if btn_next and btn_next.is_disabled: return "break"
         
         typed = entry.get().strip().lower()
-        if not typed: return
-        entry.unbind('<Return>')
+        
+        if not word_revealed:
+            if not typed:
+                # Box is empty and user hit Enter
+                if is_first_attempt:
+                    # User MUST type something on the very first try!
+                    play_error_sound()
+                    update_status("Please type your best guess first!", "#FF9800")
+                elif is_current_word_failed or pending_reveal_confirmation:
+                    # Reveal! Either they failed previously, or they are confirming a blank reveal
+                    pending_reveal_confirmation = False
+                    action_next_btn()
+                else:
+                    # Ask for confirmation (First empty enter after a failed attempt)
+                    pending_reveal_confirmation = True
+                    btn_next.set_text("Show Spelling\n(Enter)")
+                    update_status("Press Enter again to reveal the spelling.", "#FF9800")
+            else:
+                # User typed something, clear flags
+                is_first_attempt = False
+                pending_reveal_confirmation = False
+                submit(typed)
+        else:
+            # WORD IS REVEALED
+            if not typed:
+                # Box is empty and Enter is pressed -> Move to next word!
+                force_next_word()
+            else:
+                # Muscle Memory Practice Mode: Box has text -> Practice & clear
+                if typed == word:
+                    play_success_sound()
+                    update_status("Practice: Correct!", "#4CAF50")
+                else:
+                    play_error_sound()
+                    update_status("Practice: Incorrect", "#F44336")
+                entry.delete(0, tk.END)
+        
+        return "break"
+
+    def submit(typed):
+        nonlocal word_revealed, is_current_word_failed, last_action_time
         
         correct = (typed == word)
         words_dict[word]['total_count'] += 1
@@ -1325,31 +1345,56 @@ def create_practice_window(data):
             if words_dict[word]['correct_count'] >= target_correct:
                 add_to_memorized(original_word, words_dict[word]['total_count'])
                 del words_dict[word]
-                update_status("Memorized! Moved to memorized.", "#D4AF37")
+                update_status("Memorized! Press Enter to continue.", "#D4AF37")
             else:
-                update_status("Correct spelling!", "#4CAF50")
+                update_status("Correct! Press Enter to continue.", "#4CAF50")
             
             save_data_to_file({'words': words_dict, 'queue': queue}, WORDS_PATH)
             render_word_in_display(original_word)
             word_revealed = True
-            btn_next.set_text("Next Word")
-            
-            entry.config(state='disabled')
+            is_current_word_failed = False  # Registers as a perfect success
+            btn_next.set_text("Next Word\n(Enter)")
+            entry.delete(0, tk.END)
             last_action_time = time.time()
-            root.bind('<Return>', action_next_btn)
         else:
             is_current_word_failed = True
             play_error_sound()
-            update_status("Wrong spelling", "#F44336")
+            update_status("Wrong spelling. Try again or hit Enter on empty box to reveal.", "#F44336")
             
             if word not in queue: queue.append(word)
             save_data_to_file({'words': words_dict, 'queue': queue}, WORDS_PATH)
             
-            btn_next.set_text("Show Spelling")
+            btn_next.set_text("Show Spelling\n(Enter)")
             entry.delete(0, tk.END)
-            entry.bind('<Return>', submit)
 
-    def back_to_menu():
+    def action_next_btn(event=None):
+        nonlocal word_revealed, is_current_word_failed, last_action_time
+        current_time = time.time()
+        
+        if btn_next.is_disabled or (current_time - last_action_time < 0.3): 
+            return
+        last_action_time = current_time
+
+        if not word_revealed:
+            # User gave up and clicked Show or hit Double Enter
+            is_current_word_failed = True 
+            render_word_in_display(original_word)
+            word_revealed = True
+            btn_next.set_text("Next Word\n(Enter)")
+            update_status("Spelling revealed. Type to practice or press Enter to skip!", "#D4AF37")
+            
+            if word in words_dict:
+                words_dict[word]['total_count'] += 1
+                queue.append(word)
+                save_data_to_file({'words': words_dict, 'queue': queue}, WORDS_PATH)
+            
+            entry.delete(0, tk.END)
+        else:
+            force_next_word()
+            
+        entry.focus_set()
+
+    def back_to_menu(event=None):
         if btn_back.is_disabled: return
         if not word_revealed and word in words_dict:
             queue.insert(0, word)
@@ -1357,31 +1402,43 @@ def create_practice_window(data):
         root.destroy()
         create_initial_window()
 
+    def redirect_focus(event):
+        if event.char and event.char.isprintable() and event.keysym not in ['Return', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R', 'Escape']:
+            if root.focus_get() != entry:
+                entry.focus_set()
+                entry.insert(tk.END, event.char)
+                return "break"
+
     button_frame = tk.Frame(root, bg=BG_COLOR)
     button_frame.pack(pady=15)
     
     btn1_f = tk.Frame(button_frame, bg=BG_COLOR)
     btn1_f.pack(side=tk.LEFT, padx=5)
-    btn_replay = RoundedButton(btn1_f, text="Replay Sound", command=handle_replay_action, bg_color="#4CAF50", fg_color="white", width=145, height=40)
+    btn_replay = RoundedButton(btn1_f, text="Replay Sound\n(Shift+Enter)", font=("Calibri", 11, "bold"), command=handle_replay_action, bg_color="#4CAF50", fg_color="white", width=180, height=45)
     btn_replay.pack()
     
     btn2_f = tk.Frame(button_frame, bg=BG_COLOR)
     btn2_f.pack(side=tk.LEFT, padx=5)
-    btn_next = RoundedButton(btn2_f, text="Show Spelling", command=action_next_btn, bg_color="#2196F3", fg_color="white", width=145, height=40)
+    btn_next = RoundedButton(btn2_f, text="Show Spelling\n(Enterx2)", font=("Calibri", 11, "bold"), command=action_next_btn, bg_color="#2196F3", fg_color="white", width=180, height=45)
     btn_next.pack()
 
     btn3_f = tk.Frame(button_frame, bg=BG_COLOR)
     btn3_f.pack(side=tk.LEFT, padx=5)
-    btn_back = RoundedButton(btn3_f, text="Back to Menu", command=back_to_menu, bg_color="#FF9800", fg_color="white", width=145, height=40)
+    btn_back = RoundedButton(btn3_f, text="Back to Menu\n(Esc)", font=("Calibri", 11, "bold"), command=back_to_menu, bg_color="#FF9800", fg_color="white", width=180, height=45)
     btn_back.pack()
 
-    root.after(200, entry.focus_set)
-    entry.bind('<Return>', submit)
+    root.bind('<Escape>', back_to_menu)
+    root.bind('<Key>', redirect_focus)
+    
+    # Changed from Control-Return to Shift-Return for replaying audio
+    entry.bind('<Shift-Return>', handle_replay_action)
+    entry.bind('<Return>', handle_enter_key)
+    
     root.protocol("WM_DELETE_WINDOW", back_to_menu)
     root.after(200, load_next_word_cycle)
-    root.deiconify()  # Show main window after setup is complete
+    root.deiconify() 
     root.mainloop()
-
+    
 def download_all_pronunciations(root):
     config = load_config()
     if config.get("tts_mode", "auto") == "offline":

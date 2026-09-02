@@ -11,6 +11,8 @@ Mastering English vocabulary requires consistent practice and active recall. Thi
 
 ## Features
 
+- **100% Mouse-Free Practice:** The practice session is entirely keyboard-driven. The application intelligently manages text box focus and utilizes context-aware Enter key logic, allowing you to seamlessly type, reveal words, and navigate through your queue without ever touching the mouse.
+- **Muscle Memory Practice Mode:** If you misspell a word or request a reveal, the app enters a dedicated practice mode. The typing box remains active, allowing you to re-type the target word as many times as needed to build muscle memory, complete with instant success/error audio feedback.
 - **Targeted Spelling Assistance (Highlighting Weak Spots):** Prepare your vocabulary in an Excel file (like `new.xlsx`) and simply **bold** the specific parts of any word you struggle to spell. The application smartly detects this and heavily bolds those exact letters during your practice sessions. This visual emphasis helps draw your attention to your weak spots, making it much easier to memorize difficult spellings.
 - **Smart Vocabulary Management:** Easily import your word lists via standard Excel files. The app automatically tracks your progress and seamlessly moves words you've successfully learned into a separate "memorized" list, keeping your daily practice focused and efficient.
 - **Batch Audio Downloading for Offline Use:** A dedicated download feature fetches and saves missing pronunciations for your entire database based on your precise settings (US/UK accent, Slow/Normal speed). This guarantees instantaneous audio playback during practice and enables a fully offline learning experience.
