@@ -1297,32 +1297,24 @@ def create_practice_window(data):
         
         if not word_revealed:
             if not typed:
-                # Box is empty and user hit Enter
                 if is_first_attempt:
-                    # User MUST type something on the very first try!
                     play_error_sound()
                     update_status("Please type your best guess first!", "#FF9800")
                 elif is_current_word_failed or pending_reveal_confirmation:
-                    # Reveal! Either they failed previously, or they are confirming a blank reveal
                     pending_reveal_confirmation = False
                     action_next_btn()
                 else:
-                    # Ask for confirmation (First empty enter after a failed attempt)
                     pending_reveal_confirmation = True
                     btn_next.set_text("Show Spelling\n(Enter)")
                     update_status("Press Enter again to reveal the spelling.", "#FF9800")
             else:
-                # User typed something, clear flags
                 is_first_attempt = False
                 pending_reveal_confirmation = False
                 submit(typed)
         else:
-            # WORD IS REVEALED
             if not typed:
-                # Box is empty and Enter is pressed -> Move to next word!
                 force_next_word()
             else:
-                # Muscle Memory Practice Mode: Box has text -> Practice & clear
                 if typed == word:
                     play_success_sound()
                     update_status("Practice: Correct!", "#4CAF50")
@@ -1333,7 +1325,7 @@ def create_practice_window(data):
         
         return "break"
 
-   def submit(typed):
+    def submit(typed):
         nonlocal word_revealed, is_current_word_failed, last_action_time
         
         correct = (typed == word)
@@ -1352,7 +1344,7 @@ def create_practice_window(data):
             save_data_to_file({'words': words_dict, 'queue': queue}, WORDS_PATH)
             render_word_in_display(original_word)
             word_revealed = True
-            is_current_word_failed = False  # Registers as a perfect success
+            is_current_word_failed = False
             btn_next.set_text("Next Word\n(Enter)")
             entry.delete(0, tk.END)
             last_action_time = time.time()
@@ -1361,7 +1353,7 @@ def create_practice_window(data):
             play_error_sound()
             update_status("Wrong spelling. Try again or hit Enter on empty box to reveal.", "#F44336")
             
-            # (BUG FIX): Removed queue.append(word). It now correctly leaves the active queue.
+            # BUG FIX: Removed queue.append(word). Word now successfully leaves Active Queue
             save_data_to_file({'words': words_dict, 'queue': queue}, WORDS_PATH)
             
             btn_next.set_text("Show Spelling\n(Enter)")
@@ -1376,7 +1368,6 @@ def create_practice_window(data):
         last_action_time = current_time
 
         if not word_revealed:
-            # User gave up and clicked Show or confirmed via Enter
             is_current_word_failed = True 
             render_word_in_display(original_word)
             word_revealed = True
@@ -1384,12 +1375,11 @@ def create_practice_window(data):
             update_status("Spelling revealed. Type to practice or press Enter to skip!", "#D4AF37")
             
             if word in words_dict:
-                # (BUG FIX): Catch edge case: If user clicked the button directly without typing
                 if is_first_attempt:
                     words_dict[word]['total_count'] += 1
                     is_first_attempt = False
                 
-                # (BUG FIX): Removed queue.append(word). It now correctly leaves the active queue.
+                # BUG FIX: Removed queue.append(word). Word now successfully leaves Active Queue
                 save_data_to_file({'words': words_dict, 'queue': queue}, WORDS_PATH)
             
             entry.delete(0, tk.END)
@@ -1397,7 +1387,7 @@ def create_practice_window(data):
             force_next_word()
             
         entry.focus_set()
-        
+
     def back_to_menu(event=None):
         if btn_back.is_disabled: return
         if not word_revealed and word in words_dict:
@@ -1434,7 +1424,6 @@ def create_practice_window(data):
     root.bind('<Escape>', back_to_menu)
     root.bind('<Key>', redirect_focus)
     
-    # Changed from Control-Return to Shift-Return for replaying audio
     entry.bind('<Shift-Return>', handle_replay_action)
     entry.bind('<Return>', handle_enter_key)
     
@@ -1442,7 +1431,7 @@ def create_practice_window(data):
     root.after(200, load_next_word_cycle)
     root.deiconify() 
     root.mainloop()
-    
+        
 def download_all_pronunciations(root):
     config = load_config()
     if config.get("tts_mode", "auto") == "offline":
