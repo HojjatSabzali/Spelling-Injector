@@ -764,7 +764,7 @@ def show_table_window(title, columns, data):
 
 def show_help(root):
     help_text = (
-        "Spelling Injector v1.2.0 – Help & Instructions\n"
+        "Spelling Injector v1.2.1 – Help & Instructions\n"
         "--------------------------------------------\n\n"
         "1) Start Practice (100% Keyboard Friendly!):\n"
         "   - The practice session is designed so you never need to touch your mouse.\n"
@@ -786,7 +786,7 @@ def show_help(root):
         "3) Show Queue:\n"
         "   - Displays a split view of your ongoing practice cycle.\n"
         "   - Active Queue: Words currently waiting their turn to be practiced in this cycle.\n"
-        "   - Removed from Current Queue: Words you spelled correctly recently but haven't yet reached your 'target memorize count'. They are temporarily removed and will return in the next cycle.\n"
+        "   - Removed from Current Queue: Words you have already practiced in this cycle (whether correctly or incorrectly) but haven't yet reached your 'target memorize count'. They are temporarily removed and will return in the next cycle.\n"
         "   - The total count of words for each category is conveniently displayed in parentheses within the headers.\n\n"
         "4) Report & Memorized:\n"
         "   - Report: A complete table of all words currently in your learning phase, showing their correct hits vs. total attempts.\n"
@@ -1297,32 +1297,24 @@ def create_practice_window(data):
         
         if not word_revealed:
             if not typed:
-                # Box is empty and user hit Enter
                 if is_first_attempt:
-                    # User MUST type something on the very first try!
                     play_error_sound()
                     update_status("Please type your best guess first!", "#FF9800")
                 elif is_current_word_failed or pending_reveal_confirmation:
-                    # Reveal! Either they failed previously, or they are confirming a blank reveal
                     pending_reveal_confirmation = False
                     action_next_btn()
                 else:
-                    # Ask for confirmation (First empty enter after a failed attempt)
                     pending_reveal_confirmation = True
                     btn_next.set_text("Show Spelling\n(Enter)")
                     update_status("Press Enter again to reveal the spelling.", "#FF9800")
             else:
-                # User typed something, clear flags
                 is_first_attempt = False
                 pending_reveal_confirmation = False
                 submit(typed)
         else:
-            # WORD IS REVEALED
             if not typed:
-                # Box is empty and Enter is pressed -> Move to next word!
                 force_next_word()
             else:
-                # Muscle Memory Practice Mode: Box has text -> Practice & clear
                 if typed == word:
                     play_success_sound()
                     update_status("Practice: Correct!", "#4CAF50")
@@ -1352,7 +1344,7 @@ def create_practice_window(data):
             save_data_to_file({'words': words_dict, 'queue': queue}, WORDS_PATH)
             render_word_in_display(original_word)
             word_revealed = True
-            is_current_word_failed = False  # Registers as a perfect success
+            is_current_word_failed = False
             btn_next.set_text("Next Word\n(Enter)")
             entry.delete(0, tk.END)
             last_action_time = time.time()
@@ -1361,14 +1353,14 @@ def create_practice_window(data):
             play_error_sound()
             update_status("Wrong spelling. Try again or hit Enter on empty box to reveal.", "#F44336")
             
-            if word not in queue: queue.append(word)
+            # BUG FIX: Removed queue.append(word). Word now successfully leaves Active Queue
             save_data_to_file({'words': words_dict, 'queue': queue}, WORDS_PATH)
             
             btn_next.set_text("Show Spelling\n(Enter)")
             entry.delete(0, tk.END)
 
     def action_next_btn(event=None):
-        nonlocal word_revealed, is_current_word_failed, last_action_time
+        nonlocal word_revealed, is_current_word_failed, last_action_time, is_first_attempt
         current_time = time.time()
         
         if btn_next.is_disabled or (current_time - last_action_time < 0.3): 
@@ -1376,7 +1368,6 @@ def create_practice_window(data):
         last_action_time = current_time
 
         if not word_revealed:
-            # User gave up and clicked Show or hit Double Enter
             is_current_word_failed = True 
             render_word_in_display(original_word)
             word_revealed = True
@@ -1384,8 +1375,11 @@ def create_practice_window(data):
             update_status("Spelling revealed. Type to practice or press Enter to skip!", "#D4AF37")
             
             if word in words_dict:
-                words_dict[word]['total_count'] += 1
-                queue.append(word)
+                if is_first_attempt:
+                    words_dict[word]['total_count'] += 1
+                    is_first_attempt = False
+                
+                # BUG FIX: Removed queue.append(word). Word now successfully leaves Active Queue
                 save_data_to_file({'words': words_dict, 'queue': queue}, WORDS_PATH)
             
             entry.delete(0, tk.END)
@@ -1430,7 +1424,6 @@ def create_practice_window(data):
     root.bind('<Escape>', back_to_menu)
     root.bind('<Key>', redirect_focus)
     
-    # Changed from Control-Return to Shift-Return for replaying audio
     entry.bind('<Shift-Return>', handle_replay_action)
     entry.bind('<Return>', handle_enter_key)
     
@@ -1438,7 +1431,7 @@ def create_practice_window(data):
     root.after(200, load_next_word_cycle)
     root.deiconify() 
     root.mainloop()
-    
+        
 def download_all_pronunciations(root):
     config = load_config()
     if config.get("tts_mode", "auto") == "offline":
